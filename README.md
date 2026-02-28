@@ -1,12 +1,6 @@
-# SmartVision (Android, Offline)
+# SmartVision (Android)
 
-SmartVision is an offline assistive navigation app built with CameraX, TensorFlow Lite, IMU sensing, object tracking, and Android accessibility APIs.
-
-## Offline Guarantee
-
-- No network API usage is implemented.
-- No internet permission is declared in `AndroidManifest.xml`.
-- All inference models run from local `app/src/main/assets`.
+Offline assistive navigation prototype using CameraX + TensorFlow Lite float16 models.
 
 ## Build without Android Studio
 
@@ -16,4 +10,4 @@ cd android
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-> If this repository root already contains `settings.gradle`, run `./gradlew assembleDebug` directly.
+> If your repo root is already the Android project root, run `./gradlew assembleDebug` directly.
