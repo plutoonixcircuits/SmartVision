@@ -3,90 +3,43 @@ package com.smartvision.ml
 import android.content.Context
 import android.os.SystemClock
 import android.util.Log
-import java.io.Closeable
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
+import org.tensorflow.lite.Delegate
 import org.tensorflow.lite.Interpreter
 import org.tensorflow.lite.gpu.GpuDelegate
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
-class ModelManager(private val context: Context) : Closeable {
+class ModelManager(private val context: Context) {
 
-    data class RuntimeConfig(
-        val usingGpuForYolo: Boolean,
-        val cpuOnlyMode: Boolean,
-        val yoloEveryNFrames: Int,
-        val hazardEveryNFrames: Int,
-        val depthEveryNFrames: Int,
-        val threads: Int
-    )
-
-    private var gpuDelegate: GpuDelegate? = null
+    private val gpuDelegate: Delegate?
     val yoloInterpreter: Interpreter
     val hazardInterpreter: Interpreter
     val depthInterpreter: Interpreter
-    val runtimeConfig: RuntimeConfig
 
     init {
-        val started = SystemClock.elapsedRealtime()
+        val yoloStart = SystemClock.elapsedRealtime()
         gpuDelegate = try {
             GpuDelegate()
-        } catch (e: Exception) {
-            Log.w(TAG, "GPU delegate unavailable, switching to CPU mode", e)
+        } catch (_: Exception) {
             null
         }
 
-        val usingGpu = gpuDelegate != null
-        runtimeConfig = if (usingGpu) {
-            RuntimeConfig(
-                usingGpuForYolo = true,
-                cpuOnlyMode = false,
-                yoloEveryNFrames = 1,
-                hazardEveryNFrames = 1,
-                depthEveryNFrames = 3,
-                threads = 4
-            )
-        } else {
-            RuntimeConfig(
-                usingGpuForYolo = false,
-                cpuOnlyMode = true,
-                yoloEveryNFrames = 3,
-                hazardEveryNFrames = 5,
-                depthEveryNFrames = 5,
-                threads = 4
-            )
-        }
+        yoloInterpreter = createInterpreter("yolov8n_float16.tflite", useGpu = true)
+        hazardInterpreter = createInterpreter("best_float16.tflite", useGpu = false)
+        depthInterpreter = createInterpreter("midas_small.tflite", useGpu = false)
 
-        yoloInterpreter = createInterpreter(
-            assetName = "yolov8n_float16.tflite",
-            useGpu = runtimeConfig.usingGpuForYolo,
-            numThreads = runtimeConfig.threads
-        )
-        hazardInterpreter = createInterpreter(
-            assetName = "best_float16.tflite",
-            useGpu = false,
-            numThreads = runtimeConfig.threads
-        )
-        depthInterpreter = createInterpreter(
-            assetName = "midas_small.tflite",
-            useGpu = false,
-            numThreads = runtimeConfig.threads
-        )
-
-        Log.i(
-            TAG,
-            "Model stack ready in ${SystemClock.elapsedRealtime() - started}ms, config=$runtimeConfig"
-        )
+        Log.i(TAG, "Models initialized in ${SystemClock.elapsedRealtime() - yoloStart} ms")
     }
 
-    private fun createInterpreter(assetName: String, useGpu: Boolean, numThreads: Int): Interpreter {
-        val options = Interpreter.Options().apply {
-            setNumThreads(numThreads)
-            setUseXNNPACK(true)
-            if (useGpu) {
-                gpuDelegate?.let { addDelegate(it) }
+    private fun createInterpreter(assetName: String, useGpu: Boolean): Interpreter {
+        val opts = Interpreter.Options().apply {
+            setNumThreads(4)
+            if (useGpu && gpuDelegate != null) {
+                addDelegate(gpuDelegate)
+                Log.i(TAG, "GPU delegate enabled for $assetName")
             }
         }
-        return Interpreter(loadModel(assetName), options)
+        return Interpreter(loadModel(assetName), opts)
     }
 
     private fun loadModel(assetName: String): ByteBuffer {
@@ -98,12 +51,11 @@ class ModelManager(private val context: Context) : Closeable {
         }
     }
 
-    override fun close() {
+    fun close() {
         yoloInterpreter.close()
         hazardInterpreter.close()
         depthInterpreter.close()
         gpuDelegate?.close()
-        gpuDelegate = null
     }
 
     companion object {

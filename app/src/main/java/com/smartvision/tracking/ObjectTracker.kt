@@ -1,59 +1,43 @@
 package com.smartvision.tracking
 
 import com.smartvision.ml.DetectedObject
-import com.smartvision.navigation.Kalman1D
 import kotlin.math.hypot
 
 class ObjectTracker(
-    private val matchDistancePx: Float = 120f,
-    private val staleMs: Long = 1200L
+    private val matchDistancePx: Float = 140f,
+    private val staleMs: Long = 1500L
 ) {
-    private var nextId = 0
+    private var nextId = 1
     private val tracked = mutableMapOf<Int, TrackedObject>()
-    private val xFilters = mutableMapOf<Int, Kalman1D>()
-    private val yFilters = mutableMapOf<Int, Kalman1D>()
-    private val depthFilters = mutableMapOf<Int, Kalman1D>()
 
-    @Synchronized
     fun update(detections: List<DetectedObject>, nowMs: Long = System.currentTimeMillis()): List<TrackedObject> {
         val active = mutableListOf<TrackedObject>()
 
         detections.forEach { det ->
-            val match = tracked.values
+            val best = tracked.values
                 .filter { it.label == det.label }
                 .minByOrNull { old -> hypot(old.centerX - det.centerX, old.centerY - det.centerY) }
 
-            val id = if (match != null && hypot(match.centerX - det.centerX, match.centerY - det.centerY) < matchDistancePx) {
-                match.id
+            val id = if (best != null && hypot(best.centerX - det.centerX, best.centerY - det.centerY) < matchDistancePx) {
+                best.id
             } else {
-                ++nextId
+                nextId++
             }
 
-            val x = xFilters.getOrPut(id) { Kalman1D(0.03f, 0.2f) }.update(det.centerX)
-            val y = yFilters.getOrPut(id) { Kalman1D(0.03f, 0.2f) }.update(det.centerY)
-            val depth = depthFilters.getOrPut(id) { Kalman1D(0.02f, 0.1f) }.update(det.depth)
-
-            val trackedObject = TrackedObject(
+            val obj = TrackedObject(
                 id = id,
                 label = det.label,
-                centerX = x,
-                centerY = y,
-                depth = depth,
+                centerX = det.centerX,
+                centerY = det.centerY,
+                depth = det.depth,
                 zone = det.zone,
                 lastSeen = nowMs
             )
-            tracked[id] = trackedObject
-            active += trackedObject
+            tracked[id] = obj
+            active += obj
         }
 
-        val staleIds = tracked.values.filter { nowMs - it.lastSeen > staleMs }.map { it.id }
-        staleIds.forEach { staleId ->
-            tracked.remove(staleId)
-            xFilters.remove(staleId)
-            yFilters.remove(staleId)
-            depthFilters.remove(staleId)
-        }
-
-        return active.sortedBy { it.depth }
+        tracked.entries.removeIf { nowMs - it.value.lastSeen > staleMs }
+        return active.sortedBy { it.id }
     }
 }
