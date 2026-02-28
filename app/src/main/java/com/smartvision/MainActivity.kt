@@ -9,7 +9,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.smartvision.camera.CameraAnalyzer
 import com.smartvision.databinding.ActivityMainBinding
@@ -20,17 +19,12 @@ import com.smartvision.navigation.SpatialMapper
 import com.smartvision.sensors.IMUManager
 import com.smartvision.speech.TTSManager
 import com.smartvision.tracking.ObjectTracker
-import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var binding: ActivityMainBinding
-    private val viewFinder: PreviewView
-        get() = binding.viewFinder
-    private val analyzerExecutor: ExecutorService = Executors.newSingleThreadExecutor()
-    private val inferenceExecutor: ExecutorService = Executors.newSingleThreadExecutor()
-
+    private val cameraExecutor = Executors.newSingleThreadExecutor()
     private lateinit var modelManager: ModelManager
     private lateinit var ttsManager: TTSManager
     private lateinit var imuManager: IMUManager
@@ -38,7 +32,7 @@ class MainActivity : ComponentActivity() {
     private val cameraPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) startCamera() else updateNavigationText("Camera permission denied.")
+        if (granted) startCamera() else updateNavigationText("Camera permission denied")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,11 +52,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startCamera() {
-        val providerFuture = ProcessCameraProvider.getInstance(this)
-        providerFuture.addListener({
-            val cameraProvider = providerFuture.get()
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+        cameraProviderFuture.addListener({
+            val cameraProvider = cameraProviderFuture.get()
             val preview = Preview.Builder().build().also {
-                it.setSurfaceProvider(viewFinder.surfaceProvider)
+                it.surfaceProvider = binding.previewView.surfaceProvider
             }
 
             val analyzer = CameraAnalyzer(
@@ -73,18 +67,17 @@ class MainActivity : ComponentActivity() {
                 sceneMemory = SceneMemory(),
                 imuManager = imuManager,
                 ttsManager = ttsManager,
-                onNavigationUpdate = { command, fps, cpuMode ->
+                onNavigationUpdate = { command, fps ->
+                    // Telemetry callback keeps UI and accessibility output in sync.
                     runOnUiThread {
-                        val mode = if (cpuMode) "CPU" else "GPU"
-                        binding.fpsText.text = "FPS: %.1f | %s".format(fps, mode)
                         updateNavigationText(command)
+                        binding.fpsText.text = "FPS: %.1f".format(fps)
                     }
                 },
-                analyzerExecutor = analyzerExecutor,
-                inferenceExecutor = inferenceExecutor
+                analyzerExecutor = cameraExecutor
             )
 
-            val analysisUseCase = analyzer.buildImageAnalysis()
+            val analysis = analyzer.buildImageAnalysis()
 
             try {
                 cameraProvider.unbindAll()
@@ -92,10 +85,10 @@ class MainActivity : ComponentActivity() {
                     this,
                     CameraSelector.DEFAULT_BACK_CAMERA,
                     preview,
-                    analysisUseCase
+                    analysis
                 )
             } catch (_: Exception) {
-                updateNavigationText("Unable to start camera.")
+                updateNavigationText("Unable to start camera")
             }
         }, ContextCompat.getMainExecutor(this))
     }
@@ -108,8 +101,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        analyzerExecutor.shutdownNow()
-        inferenceExecutor.shutdownNow()
+        cameraExecutor.shutdown()
         imuManager.stop()
         modelManager.close()
         ttsManager.shutdown()
